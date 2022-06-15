@@ -1,3 +1,7 @@
-trigger MaintenanceRequest on Case (after update) {
-    System.debug('*** inside case trigger ***');
-    MaintenanceRequestHelper.handleAfterUpdate(trigger.new);
+trigger MaintenanceRequest on Case (before update, after update) {
+    //ToDo: Call MaintenanceRequestHelper.updateWorkOrders
+    if(trigger.isAfter){
+        MaintenanceRequestHelper.updateWorkOrders();    
+    }
+}
+
