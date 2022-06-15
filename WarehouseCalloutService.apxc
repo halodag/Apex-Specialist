@@ -1,38 +1,54 @@
-public with sharing class WarehouseCalloutService implements Queueable, Database.AllowsCallouts{
-    public List<product2> equip = new List<product2>();
+public with sharing class WarehouseCalloutService implements Queueable {
     private static final String WAREHOUSE_URL = 'https://th-superbadge-apex.herokuapp.com/equipment';
     
+    //class that makes a REST callout to an external warehouse system to get a list of equipment that needs to be updated.
+    //The callout’s JSON response returns the equipment records that you upsert in Salesforce. 
     
-    
-    public void execute(QueueableContext context) {
-        //System.debug('Equipments'+equip );
-        Http h = new Http();
-        HttpRequest httpReq = new HttpRequest();
-        httpReq.setMethod('GET');
-        httpReq.setHeader('Content-Type','application/json'); 
-        httpReq.setEndpoint(WAREHOUSE_URL);
-        HttpResponse res = h.send(httpReq);
-        List<Object> results = (List<Object>) JSON.deserializeUntyped(res.getBody());
-        System.debug(results.size());
+    @future(callout=true)
+    public static void runWarehouseEquipmentSync(){
+        Http http = new Http();
+        HttpRequest request = new HttpRequest();
         
-        for(Object fld : results){
-            Map<String,Object> entry = (Map<String,Object>)fld;
-            equip.add(new product2(
-                Warehouse_SKU__c = String.valueOf(entry.get('_id')+''),
-                Cost__c = Decimal.valueOf(entry.get('cost')+''), 
-                Lifespan_Months__c = Decimal.valueOf(entry.get('lifespan')+'') , 
-                Maintenance_Cycle__c = Decimal.valueOf(entry.get('maintenanceperiod')+''),
-                Name = String.valueOf(entry.get('name')+''),
-                QuantityUnitOfMeasure = String.valueOf(entry.get('quantity')+'') , 
-                Replacement_Part__c = Boolean.valueOf(entry.get('replacement') +''), 
-                StockKeepingUnit = String.valueOf(entry.get('sku')+'')
-            ));
-        } 
-        if(!equip.isEmpty())
-        {
-            upsert equip Warehouse_SKU__c;
-            system.debug('list got updated. Size: '+equip.size());
+        request.setEndpoint(WAREHOUSE_URL);
+        request.setMethod('GET');
+        HttpResponse response = http.send(request);
+        
+        List<Product2> warehouseEq = new List<Product2>();
+        
+        if (response.getStatusCode() == 200){
+            List<Object> jsonResponse = (List<Object>)JSON.deserializeUntyped(response.getBody());
+            System.debug(response.getBody());
+            
+            //class maps the following fields: replacement part (always true), cost, current inventory, lifespan, maintenance cycle, and warehouse SKU
+            //warehouse SKU will be external ID for identifying which equipment records to update within Salesforce
+            for (Object eq : jsonResponse){
+                Map<String,Object> mapJson = (Map<String,Object>)eq;
+                Product2 myEq = new Product2();
+                myEq.Replacement_Part__c = (Boolean) mapJson.get('replacement');
+                myEq.Name = (String) mapJson.get('name');
+                myEq.Maintenance_Cycle__c = (Integer) mapJson.get('maintenanceperiod');
+                myEq.Lifespan_Months__c = (Integer) mapJson.get('lifespan');
+                myEq.Cost__c = (Integer) mapJson.get('cost');
+                myEq.Warehouse_SKU__c = (String) mapJson.get('sku');
+                myEq.Current_Inventory__c = (Double) mapJson.get('quantity');
+                myEq.ProductCode = (String) mapJson.get('_id');
+                warehouseEq.add(myEq);
+            }
+            
+            if (warehouseEq.size() > 0){
+                upsert warehouseEq;
+                System.debug('Your equipment was synced with the warehouse one');
+            }
         }
-        
     }
+    
+    public static void execute (QueueableContext context){
+        runWarehouseEquipmentSync();
+    }
+    
 }
+
+
+
+\\\Run this after written code
+System.enqueueJob(new WarehouseCalloutService());//
